@@ -1,9 +1,10 @@
 name: Video Notifier
 
-# 30分おきに自動実行 + 手動実行も可能
+# 毎日 日本時間16:00 (= UTC 07:00) に自動実行 + 手動実行も可能
+# GitHub Actions の cron は UTC 基準なので注意
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 7 * * *'
   workflow_dispatch: {}
 
 jobs:

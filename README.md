@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────┐
-│  GitHub Actions     │  ← 30分おきに自動起動
+│  GitHub Actions     │  ← 毎日16:00(JST)に自動起動
 │  (Ubuntu runner)    │
 └──────────┬──────────┘
            │
@@ -62,12 +62,18 @@ SEARCH_QUERIES = [
 `.github/workflows/run.yml` の cron を編集：
 
 ```yaml
-- cron: '*/30 * * * *'   # 30分おき（デフォルト）
-- cron: '0 * * * *'      # 1時間おき
-- cron: '0 */6 * * *'    # 6時間おき
+- cron: '0 7 * * *'       # 毎日 JST 16:00（デフォルト）
+- cron: '0 22 * * *'      # 毎日 JST 07:00
+- cron: '0 7,22 * * *'    # 毎日 JST 16:00 と 07:00 の2回
+- cron: '*/30 * * * *'    # 30分おき
+- cron: '0 * * * *'       # 1時間おき
 ```
 
-注：GitHub ActionsのcronはUTC基準。
+注意点：
+- GitHub ActionsのcronはUTC基準。**JST = UTC + 9時間** で逆算
+  - JST 16:00 → UTC 07:00 → `0 7 * * *`
+  - JST 09:00 → UTC 00:00 → `0 0 * * *`
+- 混雑時は数分〜十数分遅延することがある
 
 ### 動画長フィルタを変える
 `MIN_DURATION_MINUTES = 5` を編集（0で無効化）。
