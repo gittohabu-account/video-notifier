@@ -117,18 +117,27 @@ def build_session() -> requests.Session:
     return s
 
 
-def fetch_html(session: requests.Session, url: str) -> str | None:
-    """指定URLのHTMLを取得。失敗時はNone"""
-    try:
-        resp = session.get(url, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        # 文字コードをサイト側のmeta charsetに任せる（日本語サイトはshift_jisの場合あり）
-        if resp.encoding and resp.encoding.lower() == "iso-8859-1":
-            resp.encoding = resp.apparent_encoding
-        return resp.text
-    except requests.RequestException as e:
-        print(f"[WARN] fetch failed: {url} : {e}", file=sys.stderr)
-        return None
+def fetch_html(session: requests.Session, url: str, retries: int = 2) -> str | None:
+    """
+    指定URLのHTMLを取得。失敗時はNone。
+    GitHub Actions のIPは時々403になるので、軽くリトライする。
+    """
+    backoff = 3.0  # 秒（リトライ間隔）
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            resp = session.get(url, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            if resp.encoding and resp.encoding.lower() == "iso-8859-1":
+                resp.encoding = resp.apparent_encoding
+            return resp.text
+        except requests.RequestException as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(backoff * (attempt + 1))
+    print(f"[WARN] fetch failed (after {retries + 1} tries): {url} : {last_err}",
+          file=sys.stderr)
+    return None
 
 
 def parse_items(html: str) -> list[dict]:
