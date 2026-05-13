@@ -1,0 +1,44 @@
+name: Video Notifier
+
+# 30分おきに自動実行 + 手動実行も可能
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # seen_urls.json / seen_thumbs.json をリポジトリにコミットするため
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run video notifier
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python video_notifier.py
+
+      - name: Commit seen state if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add seen_urls.json seen_thumbs.json 2>/dev/null || true
+          if ! git diff --quiet --cached; then
+            git commit -m "Update seen state [skip ci]"
+            git push
+          else
+            echo "No changes to seen state."
+          fi

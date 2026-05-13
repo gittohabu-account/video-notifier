@@ -1,0 +1,24 @@
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+*.pyo
+
+# テスト・デバッグ用の一時ファイル
+dryrun_output.json
+
+# ローカル環境変数ファイル（万一作成された場合）
+.env
+.env.local
+*.local
+
+# OS固有
+.DS_Store
+Thumbs.db
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+
+# Claude Code セッションデータ
+.claude/
