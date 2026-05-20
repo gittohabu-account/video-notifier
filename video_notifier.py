@@ -88,9 +88,14 @@ DRY_RUN_OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dryru
 #   $env:GMAIL_ADDRESS = "your@gmail.com"
 #   $env:GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
 #   $env:MAIL_TO = "your@gmail.com"
-GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
-MAIL_TO = os.environ.get("MAIL_TO", GMAIL_ADDRESS)
+def _clean_env(name: str, default: str = "") -> str:
+    """環境変数を読みつつBOM・前後空白を除去（PowerShellパイプ経由のBOM混入対策）"""
+    v = os.environ.get(name, default) or ""
+    return v.replace("﻿", "").strip()
+
+GMAIL_ADDRESS = _clean_env("GMAIL_ADDRESS")
+GMAIL_APP_PASSWORD = _clean_env("GMAIL_APP_PASSWORD")
+MAIL_TO = _clean_env("MAIL_TO", GMAIL_ADDRESS)
 MAIL_SUBJECT_PREFIX = "[動画新着]"
 # メール末尾に貼るシステム概要ページURL（READMEや管理ページ）
 # 環境変数で上書き可能。空文字なら表示しない。
