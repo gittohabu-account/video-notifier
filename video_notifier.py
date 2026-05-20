@@ -231,11 +231,14 @@ def _dedup(items: list[dict]) -> list[dict]:
     return out
 
 
-def fetch_destination_thumb(session: requests.Session, dest_url: str) -> str | None:
+def fetch_destination_info(
+    session: requests.Session, dest_url: str
+) -> tuple[str | None, str | None]:
     """
-    直リン先のページから OGP/Twitter Card のサムネ画像URLを抽出。
-    多くの動画サイト・ブログは og:image を設定しており、ホットリンク防止が緩い。
-    成功時: 画像URL文字列、失敗時: None
+    直リン先（動画紹介サイト）のページから2種類の情報を取得：
+      (og_image_url, video_host_link)
+
+    1回のHTTPリクエストで両方の抽出を行う（リクエスト数を倍にしないため）。
     """
     try:
         r = session.get(dest_url, timeout=REQUEST_TIMEOUT)
@@ -244,8 +247,88 @@ def fetch_destination_thumb(session: requests.Session, dest_url: str) -> str | N
             r.encoding = r.apparent_encoding
         soup = BeautifulSoup(r.text, "html.parser")
     except (requests.RequestException, OSError):
-        return None
+        return None, None
 
+    return _extract_og_image(soup, dest_url), _extract_video_host_link(soup, dest_url)
+
+
+# 動画ホストリンク抽出時にスキップするドメイン（広告・アンテナ・SNS・関連系）
+# 末尾一致でマッチ判定するので、"x.com" は "*.x.com" にしか当たらず "txxx.com" は通る
+_VIDEO_HOST_SKIP_DOMAINS = (
+    "eroterest.net",
+    "fanza.co.jp", "fanza.com", "dmm.com", "dmm.co.jp", "al.fanza.co.jp",
+    "happymail.jp", "match.com",
+    "shinobi.jp",
+    "google.com", "google.co.jp", "googleadservices.com", "googletagmanager.com",
+    "twitter.com", "x.com", "facebook.com", "instagram.com", "line.me",
+    "youtube.com", "youtu.be",
+    "amazon.co.jp", "amazon.com", "rakuten.co.jp",
+    "doubleclick.net", "i-mobile.co.jp", "popin.cc", "outbrain.com",
+    "accesstrade.net", "popads.net",
+    "okbp.xyz", "okclix.com",
+    "fetish-portal.click", "portal-fetish.com",
+    "kanzae.net",
+)
+
+# 画像CDN（リンク先が動画ページではないので除外）
+_IMAGE_CDN_PREFIXES = ("image.", "img.", "static.", "cdn.", "thumb.", "thumbs.", "i.", "pic.")
+
+
+def _extract_video_host_link(soup, base_url: str) -> str | None:
+    """
+    紹介サイトのHTMLから動画共有サイトへのリンクを抽出。
+
+    戦略:
+      Phase 1: 画像を囲む外部リンクの最初のもの（広告系・画像CDNは除外）
+      Phase 2: CTA文言を含む外部リンク（"視聴", "クリック", "動画を見る" 等）
+    """
+    from urllib.parse import urlparse
+    own_host = urlparse(base_url).netloc.lower()
+
+    def _accept(href: str) -> bool:
+        if not href or not href.startswith(("http://", "https://")):
+            return False
+        host = urlparse(href).netloc.lower()
+        if not host:
+            return False
+        # 自ドメインや関連サブドメインは除外
+        if host == own_host or host.endswith("." + own_host) or own_host.endswith("." + host):
+            return False
+        # 既知のスキップ対象（末尾一致）
+        for skip in _VIDEO_HOST_SKIP_DOMAINS:
+            if host == skip or host.endswith("." + skip):
+                return False
+        # 画像CDN
+        if any(host.startswith(p) for p in _IMAGE_CDN_PREFIXES):
+            return False
+        return True
+
+    # Phase 1: 画像を含む外部リンク
+    for a in soup.find_all("a", href=True):
+        href = (a.get("href") or "").strip()
+        if not _accept(href):
+            continue
+        if a.find("img"):
+            return href
+
+    # Phase 2: CTAテキストリンク
+    cta_patterns = (
+        "視聴", "再生", "動画を見る", "動画はこちら", "ここをクリック",
+        "クリック", "本編", "観る", "見る", "watch", "play",
+    )
+    for a in soup.find_all("a", href=True):
+        href = (a.get("href") or "").strip()
+        if not _accept(href):
+            continue
+        text = (a.get_text() or "").strip()
+        if any(p in text for p in cta_patterns):
+            return href
+
+    return None
+
+
+def _extract_og_image(soup, base_url: str) -> str | None:
+    """ページのメインサムネ画像URLを抽出（og:image系を中心に複数戦略）"""
     # 優先順:
     #   1) og:image系（SNS用、ほぼ確実にメイン画像）
     #   2) twitter:image系
@@ -274,7 +357,7 @@ def fetch_destination_thumb(session: requests.Session, dest_url: str) -> str | N
             continue
         val = (el.get(attr) or "").strip()
         if val:
-            return urljoin(dest_url, val)
+            return urljoin(base_url, val)
 
     # 最終フォールバック: <img> の中で width*height が最大のものを選ぶ
     # （ロゴやアイコンを避けるため width >= 200 のみ対象）
@@ -297,7 +380,7 @@ def fetch_destination_thumb(session: requests.Session, dest_url: str) -> str | N
             best_area = area
             best_img = src
     if best_img:
-        return urljoin(dest_url, best_img)
+        return urljoin(base_url, best_img)
 
     return None
 
@@ -524,10 +607,13 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
         meta = [v for v in (it.get("duration"), it.get("posted"), it.get("host")) if v]
         if meta:
             text_lines.append(f"   ({' / '.join(meta)})")
-        primary = it.get("direct_url") or it["url"]
-        text_lines.append(f"   ▶ {primary}")
+        # リンク優先度: 動画共有サイト > 紹介サイト > アンテナ
+        if it.get("video_host_url"):
+            text_lines.append(f"   ▶ 動画ホスト直行: {it['video_host_url']}")
         if it.get("direct_url"):
-            text_lines.append(f"   (経由元: {it['url']})")
+            label = "紹介サイト経由" if it.get("video_host_url") else "▶ 紹介サイト"
+            text_lines.append(f"   {label}: {it['direct_url']}")
+        text_lines.append(f"   アンテナ: {it['url']}")
         if it.get("query"):
             text_lines.append(f"   query: {it['query']}")
         text_lines.append("")
@@ -539,11 +625,14 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
         text_lines.append(f"このメールの仕組み・設定変更: {SYSTEM_README_URL}")
     text_body = "\n".join(text_lines)
 
-    # --- HTML版（サムネ画像入り、直リン優先、モバイル最適化）---
+    # --- HTML版（サムネ画像入り、最深リンク優先、モバイル最適化）---
+    # リンク優先順位:
+    #   video_host_url（動画共有サイト直行） > direct_url（紹介サイト） > eroterest
     blocks = []
     for i, it in enumerate(items, 1):
-        primary_url = it.get("direct_url") or it["url"]
-        is_direct = bool(it.get("direct_url"))
+        primary_url = it.get("video_host_url") or it.get("direct_url") or it["url"]
+        has_host = bool(it.get("video_host_url"))
+        has_direct = bool(it.get("direct_url"))
 
         thumb_html = ""
         # 表示優先: 直リン先のog:image → eroterestサムネ
@@ -575,25 +664,41 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
             f'line-height:1.5;">{" / ".join(meta_parts)}</div>'
         ) if meta_parts else ""
 
-        # 直リンが取れた場合、アンテナ経由のサブリンクも併記（タップ領域広め）
-        sublink_html = ""
-        if is_direct:
-            sublink_html = (
-                f'<div style="margin-top:8px;">'
+        # サブリンク：動画ホストがprimaryなら紹介サイトとアンテナを併記
+        #             紹介サイトがprimaryならアンテナのみ併記
+        sublink_parts = []
+        if has_host and has_direct:
+            sublink_parts.append(
+                f'<a href="{html_escape(it["direct_url"], quote=True)}" '
+                f'style="color:#666;font-size:13px;text-decoration:underline;'
+                f'display:inline-block;padding:6px 8px 6px 0;">紹介サイトへ</a>'
+            )
+        if has_host or has_direct:
+            sublink_parts.append(
                 f'<a href="{html_escape(it["url"], quote=True)}" '
                 f'style="color:#888;font-size:13px;text-decoration:underline;'
-                f'display:inline-block;padding:6px 0;">'
-                f'アンテナページ経由で開く</a></div>'
+                f'display:inline-block;padding:6px 8px 6px 0;">アンテナへ</a>'
             )
+        sublink_html = (
+            f'<div style="margin-top:8px;">{"".join(sublink_parts)}</div>'
+            if sublink_parts else ""
+        )
 
-        # 直リンが取れたかどうかをバッジ表示
-        badge_html = ""
-        if is_direct:
+        # バッジ表示：video_host > direct > なし
+        if has_host:
+            badge_html = (
+                '<span style="display:inline-block;background:#ea4335;color:#fff;'
+                'font-size:11px;padding:2px 7px;border-radius:3px;margin-left:6px;'
+                'vertical-align:middle;font-weight:normal;">動画直</span>'
+            )
+        elif has_direct:
             badge_html = (
                 '<span style="display:inline-block;background:#34a853;color:#fff;'
                 'font-size:11px;padding:2px 7px;border-radius:3px;margin-left:6px;'
                 'vertical-align:middle;font-weight:normal;">直リン</span>'
             )
+        else:
+            badge_html = ""
 
         query_html = (
             f'<div style="color:#aaa;font-size:11px;margin-top:4px;">'
@@ -790,11 +895,13 @@ def main() -> int:
         print(f"[INFO] DRY_RUN: limiting to {len(new_items)} items")
 
     # 新着のみ詳細ページを開いて直リンURLを解決（重い処理なので新着限定）
-    # さらに直リン先からog:image（SNS用サムネ）も取得 → ホットリンク制限が緩く高画質
+    # 直リン先からは og:image（サムネ）と video_host_url（動画共有サイトへのリンク）を
+    # 1回のHTTPで両方取得する。
     if RESOLVE_DIRECT_LINKS and new_items:
         print(f"[INFO] resolving direct URLs for {len(new_items)} new items...")
         resolved = 0
         dest_thumbs = 0
+        video_hosts = 0
         for it in new_items:
             try:
                 direct = resolve_direct_url(session, it["url"])
@@ -806,18 +913,21 @@ def main() -> int:
             if direct:
                 it["direct_url"] = direct
                 resolved += 1
-                # 直リン先のページから og:image を取得（さらに+1リクエスト）
+                # 直リン先ページから2情報を1回で取得
                 try:
-                    dt = fetch_destination_thumb(session, direct)
+                    dt, vh = fetch_destination_info(session, direct)
                 except Exception as e:
-                    print(f"[WARN] dest thumb failed: {direct} : {e}", file=sys.stderr)
-                    dt = None
+                    print(f"[WARN] dest info failed: {direct} : {e}", file=sys.stderr)
+                    dt, vh = None, None
                 if dt:
                     it["dest_thumb"] = dt
                     dest_thumbs += 1
+                if vh:
+                    it["video_host_url"] = vh
+                    video_hosts += 1
                 time.sleep(SLEEP_BETWEEN_DETAIL_REQUESTS)
         print(f"[INFO] resolved {resolved}/{len(new_items)} direct URLs, "
-              f"got {dest_thumbs} destination thumbnails")
+              f"got {dest_thumbs} thumbnails, {video_hosts} video-host links")
 
     if DRY_RUN:
         # 結果をJSONに書き出すだけ。メール送信・既知ストア更新はスキップ
