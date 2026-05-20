@@ -40,7 +40,7 @@ SEARCH_URL_TEMPLATE = "https://movie.eroterest.net/?word={word}&c=&page={page}"
 #   "AAA OR BBB"   → AAA か BBB のいずれかを含むタイトル（OR検索）
 # サイト側の検索クエリには先頭の単語のみ渡し、複雑な条件はローカルで再フィルタします
 SEARCH_QUERIES = [
-    "着衣 ずらして",
+    "ずらしハメ or ずらしてハメ or ずらして挿入 or ずらし挿入 or パンツずらして or パンツずらし or パンティずらして or パンティずらし or ずらしてバック or ずらしバック or tバックずらし or tバックずらして or ずらし生ハメ or ずらして生ハメ or ずらして生挿入 or ずらし生挿入",
 ]
 
 # 1キーワードあたりにチェックする最大ページ数
