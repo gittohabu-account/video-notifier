@@ -232,13 +232,15 @@ def _dedup(items: list[dict]) -> list[dict]:
 
 
 def fetch_destination_info(
-    session: requests.Session, dest_url: str
+    session: requests.Session, dest_url: str, expected_host: str = "",
 ) -> tuple[str | None, str | None]:
     """
     直リン先（動画紹介サイト）のページから2種類の情報を取得：
       (og_image_url, video_host_link)
 
-    1回のHTTPリクエストで両方の抽出を行う（リクエスト数を倍にしないため）。
+    expected_host: eroterest の proName 値（例 "ドーガ", "TokyoMotion", "TXXX"）。
+                   指定すると、そのホストの既知ドメインを優先的に探す。
+    1回のHTTPリクエストで両方の抽出を行う。
     """
     try:
         r = session.get(dest_url, timeout=REQUEST_TIMEOUT)
@@ -249,7 +251,36 @@ def fetch_destination_info(
     except (requests.RequestException, OSError):
         return None, None
 
-    return _extract_og_image(soup, dest_url), _extract_video_host_link(soup, dest_url)
+    return (
+        _extract_og_image(soup, dest_url),
+        _extract_video_host_link(soup, dest_url, expected_host),
+    )
+
+
+# eroterest の proName 表示 → 実際の動画ホストドメイン
+# このマップにあるホスト名の場合、紹介サイト内でそのドメインのリンクを
+# 最優先で探す（汎用ヒューリスティックより精度が高い）
+_HOST_DOMAIN_MAP = {
+    "ドーガ": "do-ga.eroterest.net",     # eroterest自前プレーヤー（重要：通常は除外対象なので特例扱い）
+    "TokyoMotion": "tokyomotion.net",
+    "TXXX": "txxx.com",
+    "VJAV": "vjav.com",
+    "ShareVideos": "sharevideos.com",
+    "PornHub": "pornhub.com",
+    "hclips": "hclips.com",
+    "HClips": "hclips.com",
+    "MGStage": "mgstage.com",
+    "Senzuri": "senzuri-douga.com",
+    "HDZog": "hdzog.com",
+    "xHamster": "xhamster.com",
+    "RedTube": "redtube.com",
+    "Xvideos": "xvideos.com",
+    "SpankBang": "spankbang.com",
+    "Eporner": "eporner.com",
+    "JavTube": "javtube.com",
+    "JavHub": "javhub.net",
+    "EroVideo": "ero-video.net",
+}
 
 
 # 動画ホストリンク抽出時にスキップするドメイン（広告・アンテナ・SNS・関連系）
@@ -274,16 +305,36 @@ _VIDEO_HOST_SKIP_DOMAINS = (
 _IMAGE_CDN_PREFIXES = ("image.", "img.", "static.", "cdn.", "thumb.", "thumbs.", "i.", "pic.")
 
 
-def _extract_video_host_link(soup, base_url: str) -> str | None:
+def _extract_video_host_link(soup, base_url: str, expected_host: str = "") -> str | None:
     """
     紹介サイトのHTMLから動画共有サイトへのリンクを抽出。
 
     戦略:
+      Phase 0: expected_host が既知マップにあれば、そのドメインを最優先で探す
       Phase 1: 画像を囲む外部リンクの最初のもの（広告系・画像CDNは除外）
       Phase 2: CTA文言を含む外部リンク（"視聴", "クリック", "動画を見る" 等）
     """
     from urllib.parse import urlparse
     own_host = urlparse(base_url).netloc.lower()
+    target_domain = _HOST_DOMAIN_MAP.get(expected_host, "") if expected_host else ""
+
+    # Phase 0: ホスト名が既知ならそのドメインを「厳密に」探す
+    # 見つかった → 返す。見つからない → None（汎用フォールバックには進まない）
+    # 理由: ホストタグがTXXXなのに紹介サイトにTXXXリンクが無い場合、
+    #       その紹介サイトは「だましサイト」の可能性が高い。間違ったリンクを返すより無の方が安全。
+    if target_domain:
+        for a in soup.find_all("a", href=True):
+            href = (a.get("href") or "").strip()
+            if not href.startswith(("http://", "https://")):
+                continue
+            host = urlparse(href).netloc.lower()
+            if host == target_domain or host.endswith("." + target_domain):
+                # 画像CDNサブドメインは除外（例: image.mgstage.com はNG、www.mgstage.comはOK）
+                if any(host.startswith(p) for p in _IMAGE_CDN_PREFIXES):
+                    continue
+                return href
+        # ホスト指定があったのに該当ドメインが見つからない → だまし疑い → None
+        return None
 
     def _accept(href: str) -> bool:
         if not href or not href.startswith(("http://", "https://")):
@@ -914,8 +965,11 @@ def main() -> int:
                 it["direct_url"] = direct
                 resolved += 1
                 # 直リン先ページから2情報を1回で取得
+                # ホスト名（"TXXX" 等）を渡して、その動画ホストドメインを優先的に探す
                 try:
-                    dt, vh = fetch_destination_info(session, direct)
+                    dt, vh = fetch_destination_info(
+                        session, direct, expected_host=it.get("host", "")
+                    )
                 except Exception as e:
                     print(f"[WARN] dest info failed: {direct} : {e}", file=sys.stderr)
                     dt, vh = None, None
