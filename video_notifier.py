@@ -361,38 +361,39 @@ def parse_duration_minutes(text: str) -> int | None:
 # キーワードクエリの解釈
 # ==========================================================================
 
-def parse_query(query: str) -> tuple[str, callable]:
+def parse_query(query: str) -> tuple[str, callable, bool]:
     """
-    ユーザクエリを「サイトに渡す検索語」と「ローカル側フィルタ関数」に分解。
+    ユーザクエリを「サイトに渡す検索語」「ローカル側フィルタ関数」「OR検索フラグ」に分解。
 
-    動画エロタレストはサイト自身がAND/-除外/OR構文をサポートしているため、
-    クエリをそのまま渡し、ローカルでは除外語の最終チェックのみ行う。
+    動画エロタレストはサイト自身がAND/-除外/OR構文をサポートしている。
+    OR検索はURL上では wordChkOr=1 パラメータで表現される（ブラウザフォーム準拠）。
+    "OR" を word= に含める方式は403で弾かれることがあるため使わない。
 
-    ユーザ構文 → サイト構文への変換:
-      "AAA BBB"        → "AAA BBB"        （AND・そのまま）
-      "AAA -BBB"       → "AAA -BBB"       （除外・そのまま）
-      "AAA OR BBB"     → "OR AAA BBB"     （OR検索：このサイトは"OR"を先頭に置く構文）
+    ユーザ構文 → サイト送信:
+      "AAA BBB"        → word=AAA BBB
+      "AAA -BBB"       → word=AAA -BBB
+      "AAA OR BBB"     → word=AAA BBB & wordChkOr=1
     """
     tokens = query.strip().split()
     if not tokens:
-        return "", lambda _t: True
+        return "", (lambda _t: True), False
 
     ng_terms = [t[1:] for t in tokens if t.startswith("-") and len(t) > 1]
+    is_or = any(t.upper() == "OR" for t in tokens)
 
-    # OR検索判定: ユーザ構文 "AAA OR BBB" → サイト構文 "OR AAA BBB"
-    if any(t.upper() == "OR" for t in tokens):
+    if is_or:
         or_terms = [t for t in tokens if t.upper() != "OR" and not t.startswith("-")]
-        site_query = " ".join(["OR"] + or_terms + [f"-{ng}" for ng in ng_terms])
+        # "OR" 自体は外し、wordChkOr=1 を URL 側で付ける
+        site_query = " ".join(or_terms + [f"-{ng}" for ng in ng_terms])
     else:
         # AND + 除外はそのままサイトに渡せる
         site_query = query.strip()
 
     # ローカルフィルタは除外語の念のための再チェックのみ
-    # （サイト側を信頼。除外語は万一漏れたら困るので二重チェック）
     def _filter(title: str) -> bool:
         return not any(ng in title for ng in ng_terms)
 
-    return site_query, _filter
+    return site_query, _filter, is_or
 
 
 # ==========================================================================
@@ -687,13 +688,16 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
 
 def crawl_one_query(session: requests.Session, query: str) -> list[dict]:
     """1キーワード分のクロール。マッチした全アイテムを返す（新旧問わず）"""
-    fetch_word, title_filter = parse_query(query)
+    fetch_word, title_filter, is_or = parse_query(query)
     if not fetch_word:
         return []
 
     matched: list[dict] = []
     for page in range(1, MAX_PAGES + 1):
         url = SEARCH_URL_TEMPLATE.format(word=quote_plus(fetch_word), page=page)
+        # OR検索時はサイトのフォーム挙動に合わせ wordChkOr=1 を付与
+        if is_or:
+            url += "&wordChkOr=1"
         print(f"[INFO] GET {url}")
         html = fetch_html(session, url)
         if not html:
