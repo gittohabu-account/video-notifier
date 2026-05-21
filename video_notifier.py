@@ -504,30 +504,31 @@ def parse_duration_minutes(text: str) -> int | None:
 # キーワードクエリの解釈
 # ==========================================================================
 
-def parse_query(query: str) -> tuple[str, callable, bool]:
+def parse_query(query: str) -> tuple[list[tuple[str, bool]], callable]:
     """
-    ユーザクエリを「サイトに渡す検索語」「ローカル側フィルタ関数」「OR検索フラグ」に分解。
+    ユーザクエリを「サイトに送る検索サブクエリの一覧」と「ローカル側フィルタ」に分解。
 
-    動画エロタレストはサイト自身がAND/-除外/OR構文をサポートしている。
-    OR検索はURL上では wordChkOr=1 パラメータで表現される（ブラウザフォーム準拠）。
+    戻り値: ([(site_query, is_or), ...], filter_func)
 
     対応構文:
-      "AAA BBB"               → AND（全部必須）
-      "AAA -BBB"              → AAA含み、BBB除外
-      "AAA OR BBB"            → AAA か BBB のどちらか含む
-      "+AAA BBB OR CCC"       → AAA必須 AND (BBB OR CCC) ← 新構文
-      "+AAA +BBB CCC OR DDD"  → AAA・BBB必須 AND (CCC OR DDD)
+      "AAA BBB"               → AND（全部必須）→ サブクエリ1個
+      "AAA -BBB"              → AAA含み、BBB除外 → サブクエリ1個
+      "AAA OR BBB"            → AAA か BBB のどちらか含む → wordChkOr=1で1個
+      "+AAA BBB OR CCC OR DDD"
+         → AAA必須 AND (BBB OR CCC OR DDD)
+         → "AAA BBB" / "AAA CCC" / "AAA DDD" の3個のANDサブクエリに展開
+         （サイト上位枠に AAA+各語の組合せが入るので取りこぼし大幅減）
 
-    "+"で始まる単語は必須扱い。OR検索時もこれらは必ず含まれる。
+    "+"で始まる単語は必須扱い。
     """
     tokens = query.strip().split()
     if not tokens:
-        return "", (lambda _it: True), False
+        return [], (lambda _it: True)
 
     is_or = any(t.upper() == "OR" for t in tokens)
-    required_terms: list[str] = []   # 必ず含む（タイトル+タグで検査）
+    required_terms: list[str] = []   # 必ず含む
     excluded_terms: list[str] = []   # 含まない
-    or_terms: list[str] = []         # OR検索時の候補語
+    or_terms: list[str] = []         # OR候補
 
     for t in tokens:
         if t.upper() == "OR":
@@ -537,22 +538,30 @@ def parse_query(query: str) -> tuple[str, callable, bool]:
         elif t.startswith("-") and len(t) > 1:
             excluded_terms.append(t[1:])
         else:
-            # OR検索時は OR候補、AND検索時は必須語として扱う
             if is_or:
                 or_terms.append(t)
             else:
                 required_terms.append(t)
 
-    if is_or:
-        # OR検索: OR候補のみサイトに送る（wordChkOr=1付）
-        # 必須語(+)はサイトでは表現できないため、ローカルフィルタで縛る
-        site_query = " ".join(or_terms + [f"-{ng}" for ng in excluded_terms])
+    excl_part = [f"-{ng}" for ng in excluded_terms]
+
+    # サブクエリ生成
+    if is_or and required_terms and or_terms:
+        # +必須語 + OR候補 → 必須語×OR候補 の組合せでN個のANDサブクエリに展開
+        # 例: +着衣 X or Y or Z → "着衣 X" "着衣 Y" "着衣 Z"
+        subqueries = [
+            (" ".join(required_terms + [or_t] + excl_part), False)
+            for or_t in or_terms
+        ]
+    elif is_or and or_terms:
+        # 純OR（必須なし） → wordChkOr=1 で1クエリ
+        subqueries = [(" ".join(or_terms + excl_part), True)]
     else:
-        # AND検索: 必須語＋除外をそのままサイトに送る
-        site_query = " ".join(required_terms + [f"-{ng}" for ng in excluded_terms])
+        # 純AND（OR無し） → 1クエリ
+        subqueries = [(" ".join(required_terms + excl_part), False)]
 
     def _filter(item: dict) -> bool:
-        """item dict（title, tagsを含む）に対する必須・除外チェック"""
+        """念のためのローカル再チェック（タイトル+タグ）"""
         searchable = item.get("title") or ""
         if item.get("tags"):
             searchable += " " + " ".join(item["tags"])
@@ -562,9 +571,12 @@ def parse_query(query: str) -> tuple[str, callable, bool]:
         for ng in excluded_terms:
             if ng in searchable:
                 return False
+        # OR候補がある場合、少なくとも1つは含まれるべき
+        if or_terms and not any(o in searchable for o in or_terms):
+            return False
         return True
 
-    return site_query, _filter, is_or
+    return subqueries, _filter
 
 
 # ==========================================================================
@@ -891,36 +903,37 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
 # ==========================================================================
 
 def crawl_one_query(session: requests.Session, query: str) -> list[dict]:
-    """1キーワード分のクロール。マッチした全アイテムを返す（新旧問わず）"""
-    fetch_word, title_filter, is_or = parse_query(query)
-    if not fetch_word:
+    """
+    1ユーザクエリ分のクロール。「+必須 OR候補」型は複数のANDサブクエリに自動展開され、
+    全サブクエリを順次走査して結果をマージする。
+    """
+    subqueries, title_filter = parse_query(query)
+    if not subqueries:
         return []
 
     matched: list[dict] = []
-    for page in range(1, MAX_PAGES + 1):
-        url = SEARCH_URL_TEMPLATE.format(word=quote_plus(fetch_word), page=page)
-        # OR検索時はサイトのフォーム挙動に合わせ wordChkOr=1 を付与
-        if is_or:
-            url += "&wordChkOr=1"
-        print(f"[INFO] GET {url}")
-        html = fetch_html(session, url)
-        if not html:
-            break
+    for site_query, is_or in subqueries:
+        for page in range(1, MAX_PAGES + 1):
+            url = SEARCH_URL_TEMPLATE.format(word=quote_plus(site_query), page=page)
+            if is_or:
+                url += "&wordChkOr=1"
+            print(f"[INFO] GET {url}")
+            html = fetch_html(session, url)
+            if not html:
+                break
 
-        items = parse_items(html)
-        if not items:
-            # 0件ページに到達したら以降は見ない
-            print(f"[INFO] no items on page {page}, stop paging.")
-            break
+            items = parse_items(html)
+            if not items:
+                print(f"[INFO] no items on page {page}, stop paging.")
+                break
 
-        # ローカルフィルタ（必須語/除外語をtitle+tagsで検査）
-        for it in items:
-            if title_filter(it):
-                it = dict(it)
-                it["query"] = query
-                matched.append(it)
+            for it in items:
+                if title_filter(it):
+                    it = dict(it)
+                    it["query"] = query
+                    matched.append(it)
 
-        time.sleep(SLEEP_BETWEEN_REQUESTS)
+            time.sleep(SLEEP_BETWEEN_REQUESTS)
 
     return matched
 
