@@ -207,6 +207,13 @@ def parse_items(html: str) -> list[dict]:
         host_el = wrapper.select_one("span.proName")
         host = host_el.get_text(strip=True) if host_el else ""
 
+        # カテゴリタグ（itemTag内の<a>テキスト。例: 企画/人気女優/朝から など）
+        tags = [
+            el.get_text(strip=True)
+            for el in wrapper.select("div.itemTag a")
+            if el.get_text(strip=True)
+        ]
+
         items.append({
             "title": title,
             "url": url,
@@ -214,6 +221,7 @@ def parse_items(html: str) -> list[dict]:
             "posted": posted,
             "duration": duration,
             "host": host,
+            "tags": tags,
         })
 
     return _dedup(items)
@@ -659,6 +667,8 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
         meta = [v for v in (it.get("duration"), it.get("posted"), it.get("host")) if v]
         if meta:
             text_lines.append(f"   ({' / '.join(meta)})")
+        if it.get("tags"):
+            text_lines.append(f"   tags: {' / '.join(it['tags'])}")
         # リンク優先度: 動画共有サイト > 紹介サイト > アンテナ
         if it.get("video_host_url"):
             text_lines.append(f"   ▶ 動画ホスト直行: {it['video_host_url']}")
@@ -716,6 +726,15 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
             f'line-height:1.5;">{" / ".join(meta_parts)}</div>'
         ) if meta_parts else ""
 
+        # カテゴリタグ（最大10個。エロタレストの itemTag）
+        tags_html = ""
+        if it.get("tags"):
+            shown_tags = it["tags"][:10]
+            tags_html = (
+                f'<div style="color:#888;font-size:12px;margin-top:4px;'
+                f'line-height:1.6;">🏷 {"・".join(html_escape(t) for t in shown_tags)}</div>'
+            )
+
         # サブリンク：動画ホストがprimaryなら紹介サイトとアンテナを併記
         #             紹介サイトがprimaryならアンテナのみ併記
         sublink_parts = []
@@ -767,7 +786,7 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
             f'style="color:#1a73e8;text-decoration:none;'
             f'display:inline-block;padding:4px 0;">'
             f'{i}. {html_escape(it["title"])}</a>{badge_html}</div>'
-            f'{meta_html}{thumb_html}{sublink_html}{query_html}</div>'
+            f'{meta_html}{tags_html}{thumb_html}{sublink_html}{query_html}</div>'
         )
     trunc_html = (
         f'<p style="color:#999;font-size:14px;">'
