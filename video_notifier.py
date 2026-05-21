@@ -510,31 +510,59 @@ def parse_query(query: str) -> tuple[str, callable, bool]:
 
     動画エロタレストはサイト自身がAND/-除外/OR構文をサポートしている。
     OR検索はURL上では wordChkOr=1 パラメータで表現される（ブラウザフォーム準拠）。
-    "OR" を word= に含める方式は403で弾かれることがあるため使わない。
 
-    ユーザ構文 → サイト送信:
-      "AAA BBB"        → word=AAA BBB
-      "AAA -BBB"       → word=AAA -BBB
-      "AAA OR BBB"     → word=AAA BBB & wordChkOr=1
+    対応構文:
+      "AAA BBB"               → AND（全部必須）
+      "AAA -BBB"              → AAA含み、BBB除外
+      "AAA OR BBB"            → AAA か BBB のどちらか含む
+      "+AAA BBB OR CCC"       → AAA必須 AND (BBB OR CCC) ← 新構文
+      "+AAA +BBB CCC OR DDD"  → AAA・BBB必須 AND (CCC OR DDD)
+
+    "+"で始まる単語は必須扱い。OR検索時もこれらは必ず含まれる。
     """
     tokens = query.strip().split()
     if not tokens:
-        return "", (lambda _t: True), False
+        return "", (lambda _it: True), False
 
-    ng_terms = [t[1:] for t in tokens if t.startswith("-") and len(t) > 1]
     is_or = any(t.upper() == "OR" for t in tokens)
+    required_terms: list[str] = []   # 必ず含む（タイトル+タグで検査）
+    excluded_terms: list[str] = []   # 含まない
+    or_terms: list[str] = []         # OR検索時の候補語
+
+    for t in tokens:
+        if t.upper() == "OR":
+            continue
+        if t.startswith("+") and len(t) > 1:
+            required_terms.append(t[1:])
+        elif t.startswith("-") and len(t) > 1:
+            excluded_terms.append(t[1:])
+        else:
+            # OR検索時は OR候補、AND検索時は必須語として扱う
+            if is_or:
+                or_terms.append(t)
+            else:
+                required_terms.append(t)
 
     if is_or:
-        or_terms = [t for t in tokens if t.upper() != "OR" and not t.startswith("-")]
-        # "OR" 自体は外し、wordChkOr=1 を URL 側で付ける
-        site_query = " ".join(or_terms + [f"-{ng}" for ng in ng_terms])
+        # OR検索: OR候補のみサイトに送る（wordChkOr=1付）
+        # 必須語(+)はサイトでは表現できないため、ローカルフィルタで縛る
+        site_query = " ".join(or_terms + [f"-{ng}" for ng in excluded_terms])
     else:
-        # AND + 除外はそのままサイトに渡せる
-        site_query = query.strip()
+        # AND検索: 必須語＋除外をそのままサイトに送る
+        site_query = " ".join(required_terms + [f"-{ng}" for ng in excluded_terms])
 
-    # ローカルフィルタは除外語の念のための再チェックのみ
-    def _filter(title: str) -> bool:
-        return not any(ng in title for ng in ng_terms)
+    def _filter(item: dict) -> bool:
+        """item dict（title, tagsを含む）に対する必須・除外チェック"""
+        searchable = item.get("title") or ""
+        if item.get("tags"):
+            searchable += " " + " ".join(item["tags"])
+        for r in required_terms:
+            if r not in searchable:
+                return False
+        for ng in excluded_terms:
+            if ng in searchable:
+                return False
+        return True
 
     return site_query, _filter, is_or
 
@@ -885,9 +913,9 @@ def crawl_one_query(session: requests.Session, query: str) -> list[dict]:
             print(f"[INFO] no items on page {page}, stop paging.")
             break
 
-        # ローカルフィルタ（AND/OR/除外を反映）
+        # ローカルフィルタ（必須語/除外語をtitle+tagsで検査）
         for it in items:
-            if title_filter(it["title"]):
+            if title_filter(it):
                 it = dict(it)
                 it["query"] = query
                 matched.append(it)
