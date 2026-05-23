@@ -111,6 +111,13 @@ SYSTEM_README_URL = os.environ.get(
 # 1回の通知メールに掲載する最大件数（多すぎる場合の保護）
 MAX_ITEMS_PER_MAIL = 50
 
+# アドホック検索（--query指定時）の追加制約
+# ・既知履歴は読まずヒット全件を新着扱い
+# ・投稿時期が ADHOC_MAX_MONTHS_AGO ヶ月以内のものに限定
+# ・最大 ADHOC_MAX_ITEMS 件で打ち切り（サイトは新しい順なので自然に新しい順で選ばれる）
+ADHOC_MAX_ITEMS = 30
+ADHOC_MAX_MONTHS_AGO = 12  # 1年以内
+
 
 # ==========================================================================
 # スクレイピング
@@ -475,6 +482,30 @@ def resolve_direct_url(session: requests.Session, page_url: str) -> str | None:
     if "movie.eroterest.net" in href:
         return None
     return href
+
+
+def parse_posted_months_ago(text: str) -> int | None:
+    """
+    投稿時期テキストを「何ヶ月前か」に変換（おおまかな概算）。
+    "6年前" → 72
+    "1年前" → 12
+    "3ヶ月前" / "3か月前" / "3カ月前" → 3
+    "10日前" / "5時間前" / "30分前" → 0（1ヶ月未満は0扱い）
+    数値が読めなかった場合は None。
+    """
+    if not text:
+        return None
+    text = text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    m = re.search(r"(\d+)\s*年前", text)
+    if m:
+        return int(m.group(1)) * 12
+    m = re.search(r"(\d+)\s*[ヶかカ]月前", text)
+    if m:
+        return int(m.group(1))
+    # 週・日・時間・分・秒 → すべて1ヶ月未満として0
+    if re.search(r"\d+\s*(週間|週|日|時間|分|秒)前", text):
+        return 0
+    return None
 
 
 def parse_duration_minutes(text: str) -> int | None:
@@ -991,6 +1022,11 @@ def main() -> int:
         seen: set[str] = set()
         seen_thumbs: set[str] = set()
         print("[INFO] DRY_RUN mode: ignoring seen state, mail will NOT be sent")
+    elif is_adhoc:
+        # アドホック: 既知履歴を読まない（ヒット全件を候補にする）
+        seen = set()
+        seen_thumbs = set()
+        print("[INFO] adhoc mode: ignoring seen state (all hits treated as new)")
     else:
         seen = load_seen()
         seen_thumbs = load_seen_thumbs() if DEDUP_BY_THUMBNAIL else set()
@@ -1035,6 +1071,27 @@ def main() -> int:
         new_items.append(it)
     print(f"[INFO] matched={len(all_matched)}, after-filter={len(filtered)}, "
           f"new={len(new_items)}")
+
+    # アドホック専用フィルタ: 投稿期間（1年以内）と件数上限
+    if is_adhoc:
+        before = len(new_items)
+        within_window = []
+        skipped_old = 0
+        skipped_unknown_date = 0
+        for it in new_items:
+            months = parse_posted_months_ago(it.get("posted", ""))
+            if months is None:
+                # 投稿日不明はスキップ（古い可能性がある）
+                skipped_unknown_date += 1
+                continue
+            if months >= ADHOC_MAX_MONTHS_AGO:
+                skipped_old += 1
+                continue
+            within_window.append(it)
+        new_items = within_window[:ADHOC_MAX_ITEMS]
+        print(f"[INFO] adhoc filter: {before} -> {len(new_items)} "
+              f"(skipped {skipped_old} old, {skipped_unknown_date} unknown-date, "
+              f"capped at {ADHOC_MAX_ITEMS})")
 
     # DRY_RUN時の件数制限
     if DRY_RUN and DRY_RUN_MAX_ITEMS > 0:

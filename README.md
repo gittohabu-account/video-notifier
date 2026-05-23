@@ -63,8 +63,10 @@ python video_notifier.py --query "+着衣 パンチラ OR ずらして"
 
 ### 仕様
 - `SEARCH_QUERIES`（固定キーワード）には影響しない
-- `seen_urls.json` を**更新しない**ので何度同じ検索しても結果が出る
+- 既知履歴（`seen_urls.json`）を **読みも書きもしない** ので、定期実行と完全に独立
+- 結果は自動的に **投稿1年以内** かつ **最大30件** に絞られる（処理時間を抑えるため）
 - メール件名に `[アドホック]` が付いて区別される
+- 上限と期間は `video_notifier.py` の `ADHOC_MAX_ITEMS` / `ADHOC_MAX_MONTHS_AGO` で変更可
 
 ## 設定変更したいとき
 
