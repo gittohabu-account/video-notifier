@@ -1,0 +1,361 @@
+/* ============================================
+   動画検索 PWA スタイル
+   モバイルファースト、システムフォント、ダークモード対応
+   ============================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+               "Yu Gothic", "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom) 16px;
+  min-height: 100vh;
+}
+
+/* ===== ヘッダ ===== */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0 12px 0;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #1d1d1f;
+}
+
+.icon-btn:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ===== フォーム ===== */
+main {
+  padding-bottom: 40px;
+}
+
+form {
+  margin: 0;
+}
+
+.label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+textarea, input[type="text"], input[type="password"] {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 17px;   /* iOSで16px以下だとフォーカス時に拡大されるので17px */
+  font-family: inherit;
+  border: 1px solid #d2d2d7;
+  border-radius: 12px;
+  background: #fff;
+  color: #1d1d1f;
+  resize: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+textarea:focus, input:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.18);
+}
+
+.hint {
+  font-size: 12px;
+  color: #888;
+  margin: 8px 2px 20px 2px;
+  line-height: 1.5;
+}
+
+.hint code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+button[type="submit"] {
+  width: 100%;
+  padding: 16px;
+  font-size: 17px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #fff;
+  background: #1a73e8;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+button[type="submit"]:active {
+  background: #1557b0;
+}
+
+button[type="submit"]:disabled {
+  background: #b0b0b0;
+  cursor: not-allowed;
+}
+
+/* ===== ステータス ===== */
+.status {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.status.loading {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.status.success {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.status.error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.status .small {
+  font-size: 13px;
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+/* ===== 履歴 ===== */
+.history {
+  margin-top: 40px;
+}
+
+.history h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin: 0 0 10px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#historyList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e5e5e7;
+}
+
+#historyList li {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #f0f0f2;
+}
+
+#historyList li:last-child {
+  border-bottom: none;
+}
+
+#historyList li button.history-item {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 14px 16px;
+  font-size: 15px;
+  font-family: inherit;
+  color: #1d1d1f;
+  cursor: pointer;
+  word-break: break-word;
+}
+
+#historyList li button.history-item:active {
+  background: #f0f0f2;
+}
+
+#historyList li button.history-delete {
+  background: none;
+  border: none;
+  padding: 14px 16px;
+  font-size: 18px;
+  color: #888;
+  cursor: pointer;
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: #1a73e8;
+  font-size: 14px;
+  font-family: inherit;
+  padding: 12px 0;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.text-btn:active {
+  opacity: 0.6;
+}
+
+/* ===== 設定ダイアログ ===== */
+dialog {
+  border: none;
+  border-radius: 14px;
+  padding: 24px;
+  max-width: 90%;
+  width: 420px;
+  background: #fff;
+  color: #1d1d1f;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+dialog h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 18px 0;
+}
+
+dialog label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin: 14px 0 6px 0;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.dialog-buttons button[type="submit"] {
+  width: auto;
+  padding: 10px 20px;
+  font-size: 15px;
+}
+
+.dialog-buttons .text-btn {
+  margin: 0;
+}
+
+/* ===== ダークモード ===== */
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background: #000;
+    color: #f5f5f7;
+  }
+
+  h1, .icon-btn {
+    color: #f5f5f7;
+  }
+
+  .icon-btn:active {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  textarea, input[type="text"], input[type="password"] {
+    background: #1c1c1e;
+    border-color: #3a3a3c;
+    color: #f5f5f7;
+  }
+
+  .hint {
+    color: #98989d;
+  }
+
+  .hint code {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .label, .history h2 {
+    color: #98989d;
+  }
+
+  #historyList {
+    background: #1c1c1e;
+    border-color: #3a3a3c;
+  }
+
+  #historyList li {
+    border-bottom-color: #2c2c2e;
+  }
+
+  #historyList li button.history-item {
+    color: #f5f5f7;
+  }
+
+  #historyList li button.history-item:active {
+    background: #2c2c2e;
+  }
+
+  dialog {
+    background: #1c1c1e;
+    color: #f5f5f7;
+  }
+
+  dialog label {
+    color: #98989d;
+  }
+
+  .status.loading {
+    background: rgba(26, 115, 232, 0.18);
+    color: #82b1ff;
+  }
+
+  .status.success {
+    background: rgba(19, 115, 51, 0.2);
+    color: #81c995;
+  }
+
+  .status.error {
+    background: rgba(197, 34, 31, 0.2);
+    color: #f28b82;
+  }
+}

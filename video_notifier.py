@@ -5,6 +5,7 @@
 検索キーワードに合致する新着動画を定期チェックし、Gmailで通知します。
 """
 
+import argparse
 import json
 import os
 import re
@@ -633,7 +634,11 @@ def _save_json_set(values: set[str], path: str, label: str) -> None:
 # Gmail通知
 # ==========================================================================
 
-def send_mail(session: requests.Session, new_items: list[dict]) -> None:
+def send_mail(
+    session: requests.Session,
+    new_items: list[dict],
+    subject_prefix: str = MAIL_SUBJECT_PREFIX,
+) -> None:
     """
     新着アイテムをGmailで通知。
     サムネ画像は CID 埋め込み方式（multipart/related）で添付し、
@@ -644,7 +649,7 @@ def send_mail(session: requests.Session, new_items: list[dict]) -> None:
 
     items = new_items[:MAX_ITEMS_PER_MAIL]
     truncated = len(new_items) - len(items)
-    subject = f"{MAIL_SUBJECT_PREFIX} 新着 {len(new_items)} 件"
+    subject = f"{subject_prefix} 新着 {len(new_items)} 件"
 
     # サムネをダウンロードしCID参照に変換
     # 優先順位: 直リン先のog:image → eroterestのサムネ（フォールバック）
@@ -938,9 +943,39 @@ def crawl_one_query(session: requests.Session, query: str) -> list[dict]:
     return matched
 
 
+def parse_cli_args() -> argparse.Namespace:
+    """
+    コマンドライン引数を解釈。
+    --query が指定された場合は「アドホックモード」で動作する：
+      ・SEARCH_QUERIES を無視し、指定キーワードのみで検索
+      ・seen_urls / seen_thumbs は読むが更新しない（履歴を汚さない）
+      ・メール件名に [アドホック] を付ける
+    """
+    parser = argparse.ArgumentParser(description="動画サイト新着通知")
+    parser.add_argument(
+        "--query", "-q",
+        type=str,
+        default="",
+        help="アドホック検索キーワード。指定時は SEARCH_QUERIES の代わりにこれだけで検索する",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
-    if not SEARCH_QUERIES:
-        print("[ERROR] SEARCH_QUERIES is empty.", file=sys.stderr)
+    args = parse_cli_args()
+    adhoc_query = args.query.strip()
+    is_adhoc = bool(adhoc_query)
+
+    if is_adhoc:
+        queries = [adhoc_query]
+        subject_prefix = f"{MAIL_SUBJECT_PREFIX}[アドホック]"
+        print(f"[INFO] adhoc mode: query={adhoc_query!r} (seen state will NOT be updated)")
+    else:
+        queries = SEARCH_QUERIES
+        subject_prefix = MAIL_SUBJECT_PREFIX
+
+    if not queries:
+        print("[ERROR] no search queries configured.", file=sys.stderr)
         return 1
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
         print(
@@ -962,7 +997,7 @@ def main() -> int:
         print(f"[INFO] loaded {len(seen)} known URLs, {len(seen_thumbs)} known thumbs")
 
     all_matched: list[dict] = []
-    for q in SEARCH_QUERIES:
+    for q in queries:
         try:
             all_matched.extend(crawl_one_query(session, q))
         except Exception as e:
@@ -1055,14 +1090,18 @@ def main() -> int:
         return 0
 
     if new_items:
-        send_mail(session, new_items)
+        send_mail(session, new_items, subject_prefix=subject_prefix)
 
-    # 既知ストア更新（フィルタ後のものを登録 = 次回以降「既知」扱い）
-    seen.update(it["url"] for it in filtered)
-    save_seen(seen)
-    if DEDUP_BY_THUMBNAIL:
-        seen_thumbs.update(it["thumb"] for it in filtered if it.get("thumb"))
-        save_seen_thumbs(seen_thumbs)
+    if is_adhoc:
+        # アドホック実行は seen を更新しない（定期実行の通知に影響させない）
+        print("[INFO] adhoc mode: skipping seen state update")
+    else:
+        # 既知ストア更新（フィルタ後のものを登録 = 次回以降「既知」扱い）
+        seen.update(it["url"] for it in filtered)
+        save_seen(seen)
+        if DEDUP_BY_THUMBNAIL:
+            seen_thumbs.update(it["thumb"] for it in filtered if it.get("thumb"))
+            save_seen_thumbs(seen_thumbs)
     return 0
 
 

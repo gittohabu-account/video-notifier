@@ -42,8 +42,29 @@
 | `.github/workflows/run.yml` | GitHub Actionsの定期実行設定（cron） |
 | `seen_urls.json` | 既に通知した動画URLの履歴 |
 | `seen_thumbs.json` | 既に通知したサムネURLの履歴（重複防止） |
+| `docs/` | アドホック検索用 PWA（スマホアプリ） |
 | `.gitignore` | Git管理対象外ファイルの指定 |
 | `README.md` | このドキュメント |
+
+## アドホック検索（任意キーワードの即時検索）
+
+スマホ／PC から任意のキーワードを入れて即時に検索 → メール通知できる仕組みを用意してます。
+
+### 使い方（PWA経由・推奨）
+`docs/README.md` の手順でセットアップ → ホーム画面アイコンをタップ → キーワード入力 → 2〜3分後にメール。
+
+### 使い方（コマンドライン）
+```powershell
+python video_notifier.py --query "+着衣 パンチラ OR ずらして"
+```
+
+### 使い方（GitHub Actions の手動実行）
+リポジトリの Actions タブ → Video Notifier → Run workflow → キーワード入力 → Run。
+
+### 仕様
+- `SEARCH_QUERIES`（固定キーワード）には影響しない
+- `seen_urls.json` を**更新しない**ので何度同じ検索しても結果が出る
+- メール件名に `[アドホック]` が付いて区別される
 
 ## 設定変更したいとき
 

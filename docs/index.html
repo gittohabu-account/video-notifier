@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1a73e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="動画検索">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+<title>動画検索</title>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>動画検索</h1>
+    <button id="settingsBtn" class="icon-btn" aria-label="設定">⚙</button>
+  </header>
+
+  <main>
+    <form id="searchForm">
+      <label for="query" class="label">キーワード</label>
+      <textarea
+        id="query"
+        name="query"
+        rows="2"
+        placeholder="例: 着衣 パンツずらして OR パンチラ"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        required></textarea>
+      <p class="hint">
+        スペース区切り = AND ／ OR で OR検索 ／ +語 = 必須 ／ -語 = 除外
+      </p>
+      <button type="submit" id="submitBtn">検索する</button>
+    </form>
+
+    <div id="status" class="status" hidden></div>
+
+    <section class="history" id="historySection" hidden>
+      <h2>履歴</h2>
+      <ul id="historyList"></ul>
+      <button type="button" id="clearHistoryBtn" class="text-btn">履歴をすべて消す</button>
+    </section>
+  </main>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" id="settingsForm">
+      <h2>初期設定</h2>
+
+      <label for="ownerInput">GitHubユーザー名</label>
+      <input type="text" id="ownerInput" placeholder="例: gittohabu-account" autocapitalize="off" spellcheck="false">
+
+      <label for="repoInput">リポジトリ名</label>
+      <input type="text" id="repoInput" placeholder="例: video-notifier" autocapitalize="off" spellcheck="false">
+
+      <label for="patInput">Personal Access Token</label>
+      <input type="password" id="patInput" placeholder="ghp_... または github_pat_..." autocapitalize="off" spellcheck="false">
+      <p class="hint">
+        Settings &gt; Developer settings &gt; Personal access tokens で発行<br>
+        スコープは <code>actions:write</code>（fine-grained 推奨）
+      </p>
+
+      <label for="workflowInput">ワークフロー名</label>
+      <input type="text" id="workflowInput" value="run.yml" autocapitalize="off" spellcheck="false">
+
+      <div class="dialog-buttons">
+        <button type="button" id="cancelSettingsBtn" class="text-btn">キャンセル</button>
+        <button type="submit" id="saveSettingsBtn">保存</button>
+      </div>
+    </form>
+  </dialog>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

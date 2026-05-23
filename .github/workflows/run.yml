@@ -5,11 +5,23 @@ name: Video Notifier
 # 「分=00」のキリ番時刻は GitHub Actions が高負荷で大幅遅延するため
 # 意図的に半端な分を指定。2回スケジュールすることで片方が失敗(403等)しても
 # もう片方でリカバリできる（seen_urls で重複通知は防がれる）。
+#
+# workflow_dispatch:
+#   inputs.query を指定して手動発火するとアドホック検索モードで動作する。
+#   ・SEARCH_QUERIES を無視して指定キーワードだけで検索
+#   ・seen_urls / seen_thumbs を更新しない（履歴を汚さない）
+#   ・PWA (docs/) からも GitHub API 経由で発火可能
 on:
   schedule:
     - cron: '17 7 * * *'    # UTC 07:17 = JST 16:17 メイン
     - cron: '23 13 * * *'   # UTC 13:23 = JST 22:23 保険
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      query:
+        description: '検索キーワード（空欄なら通常の固定キーワードで実行）'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   notify:
@@ -34,9 +46,18 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python video_notifier.py
+          INPUT_QUERY: ${{ inputs.query }}
+        run: |
+          if [ -n "$INPUT_QUERY" ]; then
+            echo "::notice::Ad-hoc search: $INPUT_QUERY"
+            python video_notifier.py --query "$INPUT_QUERY"
+          else
+            python video_notifier.py
+          fi
 
       - name: Commit seen state if changed
+        # アドホック実行（query指定あり）時は seen を更新しないのでスキップ
+        if: ${{ inputs.query == '' || inputs.query == null }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
