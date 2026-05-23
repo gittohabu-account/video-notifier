@@ -2,7 +2,7 @@
    PWA としてホーム画面追加するために必須。
    キャッシュは最小限（オフラインで開けるよう shell をキャッシュ）。 */
 
-const CACHE_NAME = 'video-notifier-v1';
+const CACHE_NAME = 'video-notifier-v2';
 const ASSETS = [
   './',
   './index.html',
