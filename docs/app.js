@@ -25,6 +25,7 @@ const historyList = document.getElementById('historyList');
 const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 
 const settingsBtn = document.getElementById('settingsBtn');
+const progressBtn = document.getElementById('progressBtn');
 const settingsDialog = document.getElementById('settingsDialog');
 const settingsForm = document.getElementById('settingsForm');
 const ownerInput = document.getElementById('ownerInput');
@@ -149,8 +150,25 @@ clearHistoryBtn.addEventListener('click', () => {
   }
 });
 
+// ===== 進捗確認URL =====
+function buildProgressUrl() {
+  const s = loadSettings();
+  if (!s.owner || !s.repo) return null;
+  const workflow = s.workflow || 'run.yml';
+  return `https://github.com/${encodeURIComponent(s.owner)}/${encodeURIComponent(s.repo)}/actions/workflows/${encodeURIComponent(workflow)}`;
+}
+
+progressBtn.addEventListener('click', () => {
+  const url = buildProgressUrl();
+  if (!url) {
+    showStatus('error', '設定が未完了です', '右上の ⚙ から設定してください。');
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+});
+
 // ===== ステータス表示 =====
-function showStatus(type, mainText, subText) {
+function showStatus(type, mainText, subText, progressUrl) {
   statusEl.hidden = false;
   statusEl.className = `status ${type}`;
   statusEl.innerHTML = '';
@@ -162,6 +180,15 @@ function showStatus(type, mainText, subText) {
     small.className = 'small';
     small.textContent = subText;
     statusEl.appendChild(small);
+  }
+  if (progressUrl) {
+    const link = document.createElement('a');
+    link.className = 'progress-link';
+    link.href = progressUrl;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = '📊 進捗を確認する';
+    statusEl.appendChild(link);
   }
 }
 
@@ -227,7 +254,8 @@ form.addEventListener('submit', async (e) => {
     showStatus(
       'success',
       '✓ 検索リクエストを送信しました',
-      'GitHub Actions が起動中です。2〜3分後にGmailで結果が届きます。'
+      'GitHub Actions が起動中です。2〜3分後にGmailで結果が届きます。',
+      buildProgressUrl()
     );
   } catch (err) {
     showStatus('error', '✕ 送信に失敗しました', err.message);
