@@ -934,6 +934,125 @@ def send_mail(
         print(f"[ERROR] mail send failed: {e}", file=sys.stderr)
 
 
+def send_empty_result_mail(
+    query: str,
+    stats: dict,
+    subject_prefix: str = MAIL_SUBJECT_PREFIX,
+) -> None:
+    """
+    アドホック検索で対象0件だったときの確認メール。
+    「送信されてない不安」を解消する目的で、内訳付きで状況を伝える。
+    """
+    subject = f"{subject_prefix} 結果0件"
+
+    matched = stats.get("matched", 0)
+    after_duration = stats.get("after_duration", 0)
+    skipped_short = stats.get("skipped_short", 0)
+    skipped_old = stats.get("skipped_old", 0)
+    skipped_unknown_date = stats.get("skipped_unknown_date", 0)
+
+    text_lines = [
+        f"アドホック検索の結果、メール対象の動画は 0 件でした。",
+        "",
+        f"キーワード: {query}",
+        "",
+        "内訳:",
+        f"  サイトでヒット:           {matched} 件",
+        f"  動画長フィルタ通過:        {after_duration} 件"
+        + (f"（{skipped_short}件が5分未満で除外）" if skipped_short else ""),
+        f"  投稿1年以内のもの:         0 件",
+    ]
+    if skipped_old:
+        text_lines.append(f"    └ {skipped_old} 件は1年より古い投稿のため除外")
+    if skipped_unknown_date:
+        text_lines.append(f"    └ {skipped_unknown_date} 件は投稿日不明のため除外")
+    text_lines.append("")
+    text_lines.append("（メール対象が0件のため、通知メールはこの確認のみ送られています。）")
+    if SYSTEM_README_URL:
+        text_lines.append("")
+        text_lines.append("-" * 40)
+        text_lines.append(f"このメールの仕組み: {SYSTEM_README_URL}")
+    text_body = "\n".join(text_lines)
+
+    # HTML版
+    rows = [
+        ("サイトでヒット", f"{matched} 件"),
+        (
+            "動画長フィルタ通過",
+            f"{after_duration} 件"
+            + (f"<span style='color:#888'>（{skipped_short}件が5分未満で除外）</span>"
+               if skipped_short else ""),
+        ),
+        ("投稿1年以内のもの", "<b style='color:#c5221f'>0 件</b>"),
+    ]
+    row_html = "".join(
+        f'<tr><td style="padding:6px 12px 6px 0;color:#666;">{html_escape(k)}</td>'
+        f'<td style="padding:6px 0;">{v}</td></tr>'
+        for k, v in rows
+    )
+
+    detail_html = ""
+    if skipped_old or skipped_unknown_date:
+        detail_lines = []
+        if skipped_old:
+            detail_lines.append(f"{skipped_old} 件は1年より古い投稿のため除外")
+        if skipped_unknown_date:
+            detail_lines.append(f"{skipped_unknown_date} 件は投稿日不明のため除外")
+        detail_html = (
+            '<div style="margin-top:12px;color:#888;font-size:13px;line-height:1.6;">'
+            + "<br>".join(f"・{html_escape(d)}" for d in detail_lines)
+            + "</div>"
+        )
+
+    footer_html = (
+        f'<div style="margin-top:32px;padding-top:16px;border-top:1px solid #ddd;'
+        f'color:#888;font-size:12px;line-height:1.6;">'
+        f'<a href="{html_escape(SYSTEM_README_URL, quote=True)}" '
+        f'style="color:#1a73e8;word-break:break-all;">{html_escape(SYSTEM_README_URL)}</a>'
+        f'</div>'
+    ) if SYSTEM_README_URL else ""
+
+    html_body = (
+        '<!doctype html><html lang="ja"><head>'
+        '<meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '</head>'
+        '<body style="margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'
+        '\'Segoe UI\',\'Hiragino Sans\',\'Yu Gothic\',sans-serif;font-size:15px;color:#222;'
+        'line-height:1.6;">'
+        '<div style="max-width:600px;margin:0 auto;">'
+        '<p style="font-size:16px;margin:0 0 16px 0;">'
+        'アドホック検索の結果、メール対象の動画は <b>0 件</b> でした。</p>'
+        f'<div style="background:#f5f5f7;padding:12px 14px;border-radius:8px;'
+        f'margin-bottom:16px;">'
+        f'<div style="font-size:13px;color:#666;margin-bottom:6px;">キーワード</div>'
+        f'<div style="font-family:monospace;font-size:14px;word-break:break-all;">'
+        f'{html_escape(query)}</div></div>'
+        f'<table style="border-collapse:collapse;width:100%;font-size:14px;">{row_html}</table>'
+        f'{detail_html}'
+        f'<p style="margin-top:20px;color:#666;font-size:13px;">'
+        f'メール対象が0件のため、通知メールはこの確認のみ送られています。</p>'
+        f'{footer_html}'
+        '</div></body></html>'
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = MAIL_TO
+    msg["Date"] = formatdate(localtime=True)
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
+            smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            smtp.sendmail(GMAIL_ADDRESS, [a.strip() for a in MAIL_TO.split(",")], msg.as_string())
+        print("[INFO] empty-result confirmation mail sent")
+    except (smtplib.SMTPException, OSError) as e:
+        print(f"[ERROR] empty-result mail send failed: {e}", file=sys.stderr)
+
+
 # ==========================================================================
 # メイン
 # ==========================================================================
@@ -1073,6 +1192,7 @@ def main() -> int:
           f"new={len(new_items)}")
 
     # アドホック専用フィルタ: 投稿期間（1年以内）と件数上限
+    adhoc_stats: dict = {}
     if is_adhoc:
         before = len(new_items)
         within_window = []
@@ -1092,6 +1212,13 @@ def main() -> int:
         print(f"[INFO] adhoc filter: {before} -> {len(new_items)} "
               f"(skipped {skipped_old} old, {skipped_unknown_date} unknown-date, "
               f"capped at {ADHOC_MAX_ITEMS})")
+        adhoc_stats = {
+            "matched": len(all_matched),
+            "after_duration": len(filtered),
+            "skipped_short": skipped_short,
+            "skipped_old": skipped_old,
+            "skipped_unknown_date": skipped_unknown_date,
+        }
 
     # DRY_RUN時の件数制限
     if DRY_RUN and DRY_RUN_MAX_ITEMS > 0:
@@ -1148,6 +1275,10 @@ def main() -> int:
 
     if new_items:
         send_mail(session, new_items, subject_prefix=subject_prefix)
+    elif is_adhoc:
+        # アドホック検索で0件 → 「結果なし」を確認メールで通知
+        # ユーザが「届かない…失敗した？」と不安になるのを防ぐ
+        send_empty_result_mail(adhoc_query, adhoc_stats, subject_prefix=subject_prefix)
 
     if is_adhoc:
         # アドホック実行は seen を更新しない（定期実行の通知に影響させない）
